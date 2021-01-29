@@ -1,0 +1,137 @@
+---
+title: "time series intro"
+author: "Shelby Walsh"
+date: "1/29/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(here)
+library(lubridate)
+library(tsibble)
+library(feasts)
+library(slider)
+```
+
+## Read in data
+```{r}
+toolik <- read_csv(here("data", "toolikweather.csv"))
+```
+
+### Convert to time series data
+```{r}
+toolik_ts <- toolik %>% 
+  mutate(date = lubridate::mdy(date)) %>% 
+  as_tsibble(key = NULL, index = date)
+
+
+```
+
+```{r}
+ggplot(data = toolik_ts, aes(x = date, y = mean_airtemp)) +
+  geom_line()
+```
+
+## Use Index_by function to aggregate time series info by intercals we specify
+
+```{r}
+
+toolik_month <- toolik_ts %>% 
+  index_by(yr_mo = ~yearmonth(.)) %>% 
+  summarize(monthly_mean_temp = mean(mean_airtemp, na.rm = TRUE))
+
+ggplot(data = toolik_month, aes(x = yr_mo, y = monthly_mean_temp)) +
+  geom_line() +
+  facet_wrap(~month(yr_mo, label = TRUE))
+```
+
+### Aggregate by week
+```{r}
+toolik_weekly <- toolik_ts %>% 
+  index_by(weekly = ~yearweek(.)) %>% 
+  summarize(weekly_airtemp = mean(mean_airtemp, na.rm = TRUE),
+            min_airtemp = min(mean_airtemp))
+
+head(toolik_weekly)
+```
+
+## Filtering time series
+
+use filter_indes to specify ranges of ts to keep or explore
+```{r}
+toolik_ts %>% 
+  filter_index("2000-06" ~ "2001-10")
+```
+
+```{r}
+toolik_ts %>% 
+  filter_index("2006-04-10" ~ "2006-05-15")
+```
+## Seasonplots
+```{r}
+toolik_ts %>% 
+  filter(year(date) > 2014) %>% 
+  gg_season(y = mean_airtemp)
+
+toolik_month %>% 
+  gg_season(y = monthly_mean_temp) +
+  theme_dark()
+```
+
+## seasonal subseries plot
+
+```{r}
+toolik_month %>% 
+  gg_subseries(monthly_mean_temp)
+```
+
+# window: plotting averagge of windows
+
+## Find moving average, use slider package
+
+```{r}
+set.seed(2021)
+test <- rnorm(n =100, mean = 40, sd = 10)
+
+slide(test, ~.x, .before = 2, .afer = 2)
+```
+
+
+```{r}
+roll_toolik_15 <- toolik_ts %>% 
+  mutate(ma_15d = as.numeric(slide(toolik_ts$mean_airtemp,
+                                   mean,
+                                   .before = 7,
+                                   .after = 7)))
+
+ggplot() +
+  geom_line(data = toolik_ts, aes(x = date, y = mean_airtemp),
+            size = 0.2,
+            color = "gray") +
+  geom_line(data = roll_toolik_15, aes(x = date, y = ma_15d)) +
+  theme_minimal()
+```
+
+### Create the ACF
+
+```{r}
+toolik_ts %>% 
+  ACF(mean_airtemp) %>% 
+  autoplot()
+
+toolik_month %>% 
+  ACF(monthly_mean_temp) %>% 
+  autoplot()
+```
+
+## Smoothing decomposition by STL
+
+```{r}
+toolik_dec <- toolik_month %>% 
+  model(STL(monthly_mean_temp ~ season(window = Inf)))
+
+components(toolik_dec) %>% autoplot()
+```
+
